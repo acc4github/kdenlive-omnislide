@@ -10,28 +10,31 @@
    Plugin Instance Data
    ========================================================================== */
 typedef struct {
-    int width, height;                    // Frame dimensions
+    int width, height;                    // Current frame dimensions
 
-    double position;                      // Transition progress (0.0 -> 1.0)
+    double position;                      // Transition progress (0.0 - 1.0)
 
-    int arrival_axis, departure_axis;     // 0=horizontal, 1=vertical, 2=opposite
+    int arrival_axis, departure_axis;     // 0=horiz, 1=vert, 2=opposite
     double arrival_angle, departure_angle;// Fine angle offset in degrees
 
     int outgoing_behavior;                // 0=Static, 1=Move, 2=Fade
 
-    double speed_curve;                   // Easing strength (0 = linear)
-    double gentle_arrival;                // Soft landing strength (%)
-    double motion_blur;                   // Motion blur intensity (%)
+    double speed_curve;                   // Easing power (0 = linear)
+    double gentle_arrival;                // Soft landing strength at end (%)
+    double motion_blur;                   // Motion blur strength (%)
 
-    int edge_smoothing;                   // 1 = adaptive blur padding, 0 = tight bounds
-    int invert;                           // Swap incoming / outgoing clips
+    int limit_to_original;                // 1 = tight original content bounds, 0 = adaptive blur padding
+    int invert;                           // Swap incoming/outgoing clips
 
-    int out_min_x, out_min_y, out_max_x, out_max_y;  // Bounds for outgoing clip
-    int in_min_x, in_min_y, in_max_x, in_max_y;      // Bounds for incoming clip
-    int bounds_calculated;                // Flag to avoid recalculating every frame
+    int out_min_x, out_min_y, out_max_x, out_max_y;  // Outgoing clip bounds
+    int in_min_x, in_min_y, in_max_x, in_max_y;      // Incoming clip bounds
+    int bounds_calculated;                // 1 = bounds already computed this instance
 
     double curve_lut[CURVE_LUT_SIZE];     // Precomputed easing curve
-    double last_speed_curve;              // Cache for LUT rebuild
+    double last_speed_curve;              // For detecting curve changes
+
+    double cached_progress;               // For instant speed caching (stutter reduction)
+    double cached_instant_speed;
 } omni_slide_t;
 
 /* Forward declarations */
@@ -54,7 +57,7 @@ static uint32_t sample_pixel(const uint32_t *f, int w, int h,
                              double pixel_scale);
 
 /* ==========================================================================
-   Plugin Interface (Frei0r standard)
+   Plugin Interface
    ========================================================================== */
 
 int f0r_init() { return 1; }
@@ -67,16 +70,16 @@ void f0r_get_plugin_info(f0r_plugin_info_t *info) {
     info->color_model = F0R_COLOR_MODEL_PACKED32;
     info->frei0r_version = FREI0R_MAJOR_VERSION;
     info->major_version = 0;
-    info->minor_version = 13;
+    info->minor_version = 14;
     info->num_params = 11;
-    info->explanation = "Versatile directional slide/swipe transition with resolution-independent motion blur, custom easing, adaptive content-aware bounds, and invert support.";
+    info->explanation = "Versatile directional slide transition with motion blur, custom easing, content-aware bounds, and invert support.";
 }
 
 void f0r_get_param_info(f0r_param_info_t *info, int idx) {
     const char* names[11] = {
         "position", "arrival_axis", "arrival_wheel", "departure_axis", "departure_wheel",
         "outgoing_behavior", "speed_curve", "gentle_arrival", "motion_blur",
-        "edge_smoothing", "invert"
+        "limit_to_original", "invert"
     };
     const char* expl[11] = {
         "Slide position (progress)",
@@ -88,7 +91,7 @@ void f0r_get_param_info(f0r_param_info_t *info, int idx) {
         "Speed Curve (%)",
         "Gentle Arrival (%)",
         "Motion Blur (%)",
-        "Edge Smoothing (ON = adaptive blur padding, OFF = tight content bounds)",
+        "Limit Areas to Original Clips (ON = tight bounds, OFF = adaptive blur padding)",
         "Invert (swap incoming and outgoing clips)"
     };
 
@@ -106,9 +109,10 @@ f0r_instance_t f0r_construct(unsigned int w, unsigned int h) {
 
     inst->outgoing_behavior = 1;
     inst->departure_angle = 180.0;
-    inst->edge_smoothing = 1;
+    inst->limit_to_original = 1;        // Default: tight bounds
     inst->invert = 1;
     inst->last_speed_curve = -1.0;
+    inst->cached_progress = -1.0;
 
     inst->out_min_x = inst->in_min_x = 0;
     inst->out_max_x = inst->in_max_x = w - 1;
@@ -145,11 +149,13 @@ void f0r_set_param_value(f0r_instance_t i, f0r_param_t p, int idx) {
         case 6: inst->speed_curve = v; break;
         case 7: inst->gentle_arrival = v; break;
         case 8: inst->motion_blur = v; break;
-        case 9: inst->edge_smoothing = (v > 0.5) ? 1 : 0;
+        case 9: inst->limit_to_original = (v > 0.5) ? 1 : 0;
                 inst->bounds_calculated = 0;
+                inst->cached_progress = -1.0;
                 break;
         case 10: inst->invert = (v > 0.5) ? 1 : 0;
                  inst->bounds_calculated = 0;
+                 inst->cached_progress = -1.0;
                  break;
     }
 }
@@ -168,7 +174,7 @@ void f0r_get_param_value(f0r_instance_t i, f0r_param_t p, int idx) {
         case 6: *out = inst->speed_curve; break;
         case 7: *out = inst->gentle_arrival; break;
         case 8: *out = inst->motion_blur; break;
-        case 9: *out = inst->edge_smoothing; break;
+        case 9: *out = inst->limit_to_original; break;
         case 10: *out = inst->invert; break;
     }
 }
@@ -177,10 +183,12 @@ void f0r_get_param_value(f0r_instance_t i, f0r_param_t p, int idx) {
    Core Helper Functions
    ========================================================================== */
 
+/* Fast heuristic content detection - scans only middle row and column */
 static void calculate_content_bounds(const uint32_t* buf, int bw, int bh,
                                      int* min_x, int* min_y, int* max_x, int* max_y) {
     int left = bw, right = -1, top = bh, bottom = -1;
 
+    // Horizontal scan - middle row
     for (int x = 0; x < bw; ++x) {
         const uint8_t* p = (const uint8_t*)&buf[(bh/2) * bw + x];
         if (p[0] || p[1] || p[2] || p[3]) {
@@ -188,6 +196,8 @@ static void calculate_content_bounds(const uint32_t* buf, int bw, int bh,
             if (x > right) right = x;
         }
     }
+
+    // Vertical scan - middle column
     for (int y = 0; y < bh; ++y) {
         const uint8_t* p = (const uint8_t*)&buf[y * bw + (bw/2)];
         if (p[0] || p[1] || p[2] || p[3]) {
@@ -232,7 +242,6 @@ static double curve_lookup(const double *lut, double t) {
     return lut[i] * (1.0 - frac) + lut[i + 1] * frac;
 }
 
-/* Gentle arrival when speed_curve = 0 (linear base) */
 static double reversed_linear(omni_slide_t *inst, double t) {
     double strength = 1.0 + (inst->gentle_arrival / 100.0) * 10.0;
     return 1.0 - pow(1.0 - t, strength);
@@ -251,7 +260,6 @@ static double get_progress(omni_slide_t *inst, double p) {
     if (inst->speed_curve <= 0.0)
         return reversed_linear(inst, p);
 
-    // Combined curve + gentle arrival
     double g = inst->gentle_arrival / 100.0;
     double main_end = 1.0 - g;
 
@@ -264,8 +272,14 @@ static double get_progress(omni_slide_t *inst, double p) {
 
 static double get_instant_speed(omni_slide_t *inst, double p) {
     if (p <= 0.0 || p >= 1.0) return 0.0;
+    if (fabs(p - inst->cached_progress) < 0.0001)
+        return inst->cached_instant_speed;
+
     double eps = 0.0005;
-    return (get_progress(inst, p + eps) - get_progress(inst, p)) / eps * 0.55;
+    double speed = (get_progress(inst, p + eps) - get_progress(inst, p)) / eps * 0.55;
+    inst->cached_progress = p;
+    inst->cached_instant_speed = speed;
+    return speed;
 }
 
 static void get_clip_vector(int axis, double ang, double *dx, double *dy) {
@@ -279,11 +293,11 @@ static void get_clip_vector(int axis, double ang, double *dx, double *dy) {
 static inline uint32_t fade_to_transparent(uint32_t px, double f) {
     if (f >= 1.0) return px;
     if (f <= 0.0) return 0;
-
     uint8_t a = (uint8_t)(((px >> 24) & 0xFF) * f);
     return (a << 24) | (px & 0x00FFFFFF);
 }
 
+/* Unified sampling: fast path for no blur, full blur sampling otherwise */
 static uint32_t sample_pixel(const uint32_t *f, int w, int h,
                              int x, int y, double dx, double dy, double blur_amt,
                              int minx, int miny, int maxx, int maxy,
@@ -297,6 +311,7 @@ static uint32_t sample_pixel(const uint32_t *f, int w, int h,
         return f[y * w + x];
     }
 
+    // Blur sampling
     const int steps = 5;
     double r = 0, g = 0, b = 0, a = 0, tot = 0;
     double step_size = (blur_amt * pixel_scale) / steps;
@@ -339,18 +354,22 @@ static void apply_slide(omni_slide_t *inst, uint32_t *out,
     double pixel_scale = (double)w / REFERENCE_WIDTH;
     double blur_amt = inst->motion_blur * get_instant_speed(inst, linear_p) * 0.8;
 
+    // Compute content bounds once per instance or after parameter change
     if (!inst->bounds_calculated) {
         calculate_content_bounds(clip_a, w, h, &inst->out_min_x, &inst->out_min_y, &inst->out_max_x, &inst->out_max_y);
         calculate_content_bounds(clip_b, w, h, &inst->in_min_x, &inst->in_min_y, &inst->in_max_x, &inst->in_max_y);
 
-        if (inst->edge_smoothing && blur_amt > 0.6) {
+        // Adaptive padding only when "Limit Areas to Original Clips" is OFF
+        if (!inst->limit_to_original && blur_amt > 0.6) {
             int expand = (int)(blur_amt * pixel_scale * 1.2 + 0.5);
 
+            // Expand outgoing bounds
             inst->out_min_x = (inst->out_min_x - expand < 0) ? 0 : inst->out_min_x - expand;
             inst->out_min_y = (inst->out_min_y - expand < 0) ? 0 : inst->out_min_y - expand;
             inst->out_max_x = (inst->out_max_x + expand >= w) ? w - 1 : inst->out_max_x + expand;
             inst->out_max_y = (inst->out_max_y + expand >= h) ? h - 1 : inst->out_max_y + expand;
 
+            // Expand incoming bounds
             inst->in_min_x = (inst->in_min_x - expand < 0) ? 0 : inst->in_min_x - expand;
             inst->in_min_y = (inst->in_min_y - expand < 0) ? 0 : inst->in_min_y - expand;
             inst->in_max_x = (inst->in_max_x + expand >= w) ? w - 1 : inst->in_max_x + expand;
@@ -360,6 +379,7 @@ static void apply_slide(omni_slide_t *inst, uint32_t *out,
         inst->bounds_calculated = 1;
     }
 
+    // Compute movement vectors and offsets
     double arr_dx, arr_dy, dep_dx, dep_dy;
     get_clip_vector(inst->arrival_axis, inst->arrival_angle, &arr_dx, &arr_dy);
     get_clip_vector(inst->departure_axis, inst->departure_angle, &dep_dx, &dep_dy);
@@ -370,6 +390,7 @@ static void apply_slide(omni_slide_t *inst, uint32_t *out,
     double off_arr = (1.0 - p) * ext_arr;
     double off_dep = p * ext_dep;
 
+    // Render loop
     for (int y = 0; y < h; ++y) {
         int row = y * w;
         int arr_oy = (int)(off_arr * arr_dy + 0.5) + y;
@@ -378,24 +399,26 @@ static void apply_slide(omni_slide_t *inst, uint32_t *out,
         int dep_ox_base = (int)(off_dep * dep_dx + 0.5);
 
         for (int x = 0; x < w; ++x) {
+            // Incoming clip
             int sx = arr_ox_base + x;
             int sy = arr_oy;
             uint32_t incoming_px = sample_pixel(clip_b, w, h, sx, sy, arr_dx, arr_dy, blur_amt,
                                                 inst->in_min_x, inst->in_min_y, inst->in_max_x, inst->in_max_y,
                                                 pixel_scale);
 
+            // Outgoing clip
             uint32_t outgoing_px = 0;
-            if (inst->outgoing_behavior == 0) {
+            if (inst->outgoing_behavior == 0) {  // Static
                 outgoing_px = sample_pixel(clip_a, w, h, x, y, 0.0, 0.0, blur_amt,
                                            inst->out_min_x, inst->out_min_y, inst->out_max_x, inst->out_max_y,
                                            pixel_scale);
-            } else if (inst->outgoing_behavior == 1) {
+            } else if (inst->outgoing_behavior == 1) {  // Move
                 int sx1 = dep_ox_base + x;
                 int sy1 = dep_oy;
                 outgoing_px = sample_pixel(clip_a, w, h, sx1, sy1, dep_dx, dep_dy, blur_amt,
                                            inst->out_min_x, inst->out_min_y, inst->out_max_x, inst->out_max_y,
                                            pixel_scale);
-            } else {
+            } else {  // Fade
                 uint32_t base = sample_pixel(clip_a, w, h, x, y, 0.0, 0.0, blur_amt,
                                              inst->out_min_x, inst->out_min_y, inst->out_max_x, inst->out_max_y,
                                              pixel_scale);
@@ -414,8 +437,8 @@ void f0r_update2(f0r_instance_t i, double time, const uint32_t *in1, const uint3
     if (p < 0.0) p = 0.0;
     if (p > 1.0) p = 1.0;
 
-    const uint32_t *clip_a = inst->invert ? in2 : in1;
-    const uint32_t *clip_b = inst->invert ? in1 : in2;
+    const uint32_t *clip_a = inst->invert ? in2 : in1;   // Outgoing
+    const uint32_t *clip_b = inst->invert ? in1 : in2;   // Incoming
 
     apply_slide(inst, out, clip_a, clip_b, p);
 }

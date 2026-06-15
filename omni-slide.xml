@@ -44,8 +44,8 @@
         <name>Motion Blur (%)</name>
     </parameter>
 
-    <parameter type="bool" name="edge_smoothing" default="0">
-        <name>Edge Smoothing</name>
+<parameter type="bool" name="limit_to_original" default="1">
+        <name>Limit Areas to Original Clips</name>
     </parameter>
 
     <parameter type="bool" name="invert" default="0">
