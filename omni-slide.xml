@@ -1,0 +1,58 @@
+<?xml version="1.0"?>
+<!DOCTYPE kpartgui>
+<transition tag="frei0r.omni-slide" id="frei0r.omni-slide" type="videotransition">
+    <name>OmniSlide</name>
+    <description>A versatile directional slide/swipe transition tool.</description>
+    <author>acc4commissions and Grok 4.3</author>
+
+    <parameter type="animated" name="position" max="1000" min="0" default="0=0;%out=1" factor="1000">
+        <name>Slide position (progress)</name>
+    </parameter>
+
+    <parameter type="list" name="arrival_axis" default="0" paramlist="0;1;2">
+        <name>Arrival Direction Axis</name>
+        <paramlistdisplay>+0,+90,+180</paramlistdisplay>
+    </parameter>
+
+    <parameter type="double" name="arrival_wheel" max="180" min="0" default="0">
+        <name>Arrival Direction Wheel</name>
+    </parameter>
+
+    <parameter type="list" name="departure_axis" default="0" paramlist="0;1;2">
+        <name>Departure Direction Axis</name>
+        <paramlistdisplay>+0,+90,+180</paramlistdisplay>
+    </parameter>
+
+    <parameter type="double" name="departure_wheel" max="180" min="0" default="180">
+        <name>Departure Direction Wheel</name>
+    </parameter>
+
+    <parameter type="list" name="outgoing_behavior" default="1" paramlist="0;1;2">
+        <name>Outgoing Behavior</name>
+        <paramlistdisplay>Static,Move,Fade</paramlistdisplay>
+    </parameter>
+
+    <parameter type="double" name="speed_curve" max="100" min="0" default="0">
+        <name>Speed Curve (%)</name>
+    </parameter>
+
+    <parameter type="double" name="gentle_arrival" max="100" min="0" default="0">
+        <name>Gentle Arrival (%)</name>
+    </parameter>
+
+    <parameter type="double" name="motion_blur" max="100" min="0" default="0">
+        <name>Motion Blur (%)</name>
+    </parameter>
+
+    <parameter type="bool" name="edge_smoothing" default="0">
+        <name>Edge Smoothing</name>
+    </parameter>
+
+    <parameter type="bool" name="invert" default="0">
+        <name>Invert</name>
+    </parameter>
+
+    <preview>
+        <parameter name="position">0=0;-1=1</parameter>
+    </preview>
+</transition>
