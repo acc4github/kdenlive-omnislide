@@ -2,6 +2,12 @@
 
 A frei0r-based, extremely versatile slide transition plugin for Kdenlive. It's designed to cover pretty much any slide/swipe-related transitions.
 
+<p align="center">
+
+<img width="447" height="415" alt="607179637-2d89b354-bc0d-4dd7-a2dd-b1509b8fdff5" src="https://github.com/user-attachments/assets/6d489e33-c631-40e5-9ba2-ad79e4c71b25" />
+
+</p>
+
 ## Features
 
 - **Arrival Direction Axis / Wheel**: Controls the angles at which the incoming clip enters.
@@ -12,10 +18,15 @@ A frei0r-based, extremely versatile slide transition plugin for Kdenlive. It's d
   - **When Speed Curve is at 0%**: Gentle Arrival acts like a reverse Speed Curve, adding a negative logarithmic curve to the speed. As you dial up Gentle Arrival, the curve will become stronger, and clips will start fast and decelerate towards the end. 
   - **When Speed Curve is used**: Gentle Arrival's intensity will symmetrically mirror Speed Curve's logarithmic curve. And as you dial up Gentle Arrival, it will expand the 'effective zone' from the clip's end. The clips will start to slow down as the playback enters this zone. At 100%, the entire clip is under Gentle Arrival's control.
 - **Motion Blur (%)**: Add directional blur to the moving clips. (The current motion blur is very low-res to prioritize performance. I didn't add controls for blur quality since I thought it was not that important, but I might later...)
-- **Edge Smoothing**:
-  - **ON**: Smoothing out the clip's edge pixels. (Note that it introduces dark edges on blurred clips due to Kdenlive's limitation.) 
-  - **OFF**: The clip's boundaries are exactly snapped to its actual content.
-- **Invert**: Invert the effect.
+- **Limit Areas to Original Clips**:
+  - **ON**: The clip's boundaries are exactly snapped to its actual content.
+  - **OFF**: Free the clip's edge pixels, allowing some smearing with the blur. (Note that due to Kdenlive's limitation, it doesn't apply to all sides, and introduces dark edges on blurred clips.) 
+- **Invert**: Switch the incoming and outgoing clip.
+
+## Demo
+
+https://github.com/user-attachments/assets/5bdf3fcd-6e06-4061-976b-6eb66bde36b6
+
 
 ## Installation (Windows)
 
