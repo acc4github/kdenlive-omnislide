@@ -221,7 +221,7 @@ static void build_curve_lut(omni_slide_t *inst) {
         for (int i = 0; i < CURVE_LUT_SIZE; ++i)
             inst->curve_lut[i] = i / (double)(CURVE_LUT_SIZE - 1);
     } else {
-        double exp_val = 1.0 + (c / 100.0) * 10.0;
+        double exp_val = 1.0 + (c / 100.0) * 9.9;
         for (int i = 0; i < CURVE_LUT_SIZE; ++i) {
             double t = i / (double)(CURVE_LUT_SIZE - 1);
             inst->curve_lut[i] = pow(t, exp_val);
@@ -243,7 +243,7 @@ static double curve_lookup(const double *lut, double t) {
 }
 
 static double reversed_linear(omni_slide_t *inst, double t) {
-    double strength = 1.0 + (inst->gentle_arrival / 100.0) * 10.0;
+    double strength = 1.0 + (inst->gentle_arrival / 100.0) * 9.9;
     return 1.0 - pow(1.0 - t, strength);
 }
 
