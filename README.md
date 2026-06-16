@@ -44,3 +44,5 @@ See the LICENSE for full details.
 
 Developed for the open-source video editing community.  
 Copyright (C) 2026 acc4commissions
+
+AI Assistant: Grok(4.3)
