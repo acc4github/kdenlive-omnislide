@@ -3,7 +3,7 @@
 #include <frei0r.h>
 #include <math.h>
 
-#define CURVE_LUT_SIZE 2048
+#define CURVE_LUT_SIZE 1024
 #define REFERENCE_WIDTH 1920.0
 
 /* ==========================================================================
@@ -147,8 +147,14 @@ void f0r_set_param_value(f0r_instance_t i, f0r_param_t p, int idx) {
                 else if (inst->outgoing_behavior > 2) inst->outgoing_behavior = 2;
                 break;
         case 6: inst->speed_curve = v; break;
-        case 7: inst->gentle_arrival = v; break;
-        case 8: inst->motion_blur = v; break;
+        case 7:
+            inst->gentle_arrival = v;
+            inst->cached_progress = -1.0;   // FIX: invalidate speed cache
+            break;
+        case 8:
+            inst->motion_blur = v;
+            inst->bounds_calculated = 0;    // FIX: recompute bounds with new blur expansion
+            break;
         case 9: inst->limit_to_original = (v > 0.5) ? 1 : 0;
                 inst->bounds_calculated = 0;
                 inst->cached_progress = -1.0;
@@ -312,7 +318,7 @@ static uint32_t sample_pixel(const uint32_t *f, int w, int h,
     }
 
     // Blur sampling
-    const int steps = 5;
+    const int steps = 8;
     double r = 0, g = 0, b = 0, a = 0, tot = 0;
     double step_size = (blur_amt * pixel_scale) / steps;
 
