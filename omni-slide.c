@@ -303,6 +303,26 @@ static inline uint32_t fade_to_transparent(uint32_t px, double f) {
     return (a << 24) | (px & 0x00FFFFFF);
 }
 
+
+static inline uint32_t alpha_composite(uint32_t fg, uint32_t bg) {
+    if (fg == 0) return bg;                    // Fully transparent incoming
+    if (bg == 0 || ((fg >> 24) & 0xFF) == 255) return fg;  // Fully opaque incoming or empty bg
+
+    uint8_t fa = (fg >> 24) & 0xFF;
+    uint8_t ba = (bg >> 24) & 0xFF;
+
+    // Fast approximate premultiplied over operator
+    uint32_t rb = (((fg & 0xFF00FF) * fa) + ((bg & 0xFF00FF) * (255 - fa))) >> 8;
+    uint32_t g  = (((fg & 0x00FF00) * fa) + ((bg & 0x00FF00) * (255 - fa))) >> 8;
+
+    uint8_t out_a = fa + ((ba * (255u - fa)) >> 8);
+
+    return (out_a << 24) | (rb & 0xFF00FF) | (g & 0x00FF00);
+}
+
+
+
+
 /* Unified sampling: fast path for no blur, full blur sampling otherwise */
 static uint32_t sample_pixel(const uint32_t *f, int w, int h,
                              int x, int y, double dx, double dy, double blur_amt,
@@ -431,7 +451,7 @@ static void apply_slide(omni_slide_t *inst, uint32_t *out,
                 outgoing_px = fade_to_transparent(base, 1.0 - p);
             }
 
-            out[row + x] = incoming_px ? incoming_px : outgoing_px;
+            out[row + x] = alpha_composite(incoming_px, outgoing_px);
         }
     }
 }
