@@ -338,7 +338,7 @@ static uint32_t sample_pixel(const uint32_t *f, int w, int h,
     }
 
     // Blur sampling
-    const int steps = 8;
+    const int steps = 6;
     double r = 0, g = 0, b = 0, a = 0, tot = 0;
     double step_size = (blur_amt * pixel_scale) / steps;
 
